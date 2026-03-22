@@ -1,109 +1,134 @@
+import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
-import db from '../config/db.js';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
-const DATA_PATH = path.join(process.cwd(), 'data');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// Configure the number of words per Unit
-const ITEMS_PER_UNIT = 20;
+// Cấu hình kết nối Database sử dụng biến môi trường từ .env
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 
-async function seed() {
+const dbConfig = {
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'password',
+    database: process.env.DB_NAME || 'japanese_learning_db'
+};
+
+// Hàm chia nhỏ mảng thành các phần bằng nhau (mỗi phần 20 items)
+const chunkArray = (array, size) => {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += size) {
+        chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
+};
+
+async function migrateData() {
+    const connection = await mysql.createConnection(dbConfig);
+    console.log("🚀 Bắt đầu quá trình Migration...");
+
     try {
-        console.log('--- Start the data loading process. ---');
+        // --- 1. MIGRATION VOCABULARY ---
+        const levels = ['n5', 'n4', 'n3', 'n2', 'n1'];
+        for (const lvl of levels) {
+            const vocabPath = path.join(__dirname, `../../data/vocabulary/${lvl}.json`);
+            if (fs.existsSync(vocabPath)) {
+                const data = JSON.parse(fs.readFileSync(vocabPath, 'utf8'));
+                const chunks = chunkArray(data, 20); // Chia 20 từ mỗi bài
 
-        // 1. Initialize Level and Category
-        const levels = ['N5', 'N4', 'N3', 'N2', 'N1'];
-        const levelMap = {};
-        for (const name of levels) {
-            const [res] = await db.query('INSERT IGNORE INTO jlpt_level (LevelName) VALUES (?)', [name]);
-            const [rows] = await db.query('SELECT LevelID FROM jlpt_level WHERE LevelName = ?', [name]);
-            levelMap[name] = rows[0].LevelID;
-        }
+                for (let i = 0; i < chunks.length; i++) {
+                    // Tạo bài học mới cho mỗi nhóm 20 từ
+                    const [res] = await connection.execute(
+                        "INSERT INTO `Lesson` (JLPT_Level, Title, Type) VALUES (?, ?, ?)",
+                        [lvl.toUpperCase(), `Vocabulary ${lvl.toUpperCase()} - Lesson ${i + 1}`, 'Vocabulary']
+                    );
+                    const lessonId = res.insertId;
 
-        const categories = ['Characters', 'Vocabulary', 'Kanji'];
-        const catMap = {};
-        for (const name of categories) {
-            await db.query('INSERT IGNORE INTO category (CategoryName) VALUES (?)', [name]);
-            const [rows] = await db.query('SELECT CategoryID FROM category WHERE CategoryName = ?', [name]);
-            catMap[name] = rows[0].CategoryID;
-        }
-
-        // 2. Load Alphabet
-        console.log('Loading Alphabet...');
-        const alphabetFiles = ['hiragana.json', 'katakana.json'];
-        for (const file of alphabetFiles) {
-            const data = JSON.parse(fs.readFileSync(path.join(DATA_PATH, 'alphabet', file), 'utf-8'));
-            for (const item of data) {
-                // Process Unit (A-row, Ka-row...)
-                let [uRows] = await db.query('SELECT UnitID FROM unit WHERE UnitName = ?', [item.unit]);
-                let unitId;
-                if (uRows.length === 0) {
-                    const [res] = await db.query('INSERT INTO unit (UnitName, LevelID) VALUES (?, NULL)', [item.unit]);
-                    unitId = res.insertId;
-                } else {
-                    unitId = uRows[0].UnitID;
+                    // Chèn 20 từ vào bảng Vocabulary
+                    for (const item of chunks[i]) {
+                        await connection.execute(
+                            "INSERT INTO `Vocabulary` (LessonID, Word, Furigana, Meaning) VALUES (?, ?, ?, ?)",
+                            [
+                                lessonId,
+                                item.kanji || item.kana, // Ưu tiên Kanji, nếu không có dùng Kana
+                                item.kana,
+                                item.waller_definition
+                            ]
+                        );
+                    }
                 }
-                await db.query('INSERT INTO question (Content, CorrectAnswer, UnitID, CategoryID) VALUES (?, ?, ?, ?)', 
-                    [item.content, item.meaning, unitId, catMap['Characters']]);
+                console.log(`✅ Đã nạp xong Vocabulary ${lvl}`);
             }
         }
 
-        // 3. Load Kanji & Vocabulary (N5 -> N1)
-        for (const lv of levels) {
-            // Load Kanji
-            const kanjiFile = path.join(DATA_PATH, 'kanji', `${lv}.json`);
-            if (fs.existsSync(kanjiFile)) {
-                console.log(`Loading Kanji ${lv}...`);
-                const data = JSON.parse(fs.readFileSync(kanjiFile, 'utf-8'));
-                await processItems(data, levelMap[lv], catMap['Kanji'], 'Kanji');
-            }
+        // --- 2. MIGRATION KANJI ---
+        for (const lvl of levels) {
+            const kanjiPath = path.join(__dirname, `../../data/kanji/${lvl.toUpperCase()}.json`);
+            if (fs.existsSync(kanjiPath)) {
+                const data = JSON.parse(fs.readFileSync(kanjiPath, 'utf8'));
+                const chunks = chunkArray(data, 20);
 
-            // Load Vocabulary
-            const vocabFile = path.join(DATA_PATH, 'vocabulary', `${lv.toLowerCase()}.json`);
-            if (fs.existsSync(vocabFile)) {
-                console.log(`Loading Vocabulary ${lv}...`);
-                const data = JSON.parse(fs.readFileSync(vocabFile, 'utf-8'));
-                await processItems(data, levelMap[lv], catMap['Vocabulary'], 'Vocab');
+                for (let i = 0; i < chunks.length; i++) {
+                    const [res] = await connection.execute(
+                        "INSERT INTO `Lesson` (JLPT_Level, Title, Type) VALUES (?, ?, ?)",
+                        [lvl.toUpperCase(), `Kanji ${lvl.toUpperCase()} - Lesson ${i + 1}`, 'Kanji']
+                    );
+                    const lessonId = res.insertId;
+
+                    for (const item of chunks[i]) {
+                        await connection.execute(
+                            "INSERT INTO `Kanji` (LessonID, `Character`, Onyomi, Kunyomi, Meaning) VALUES (?, ?, ?, ?, ?)",
+                            [
+                                lessonId,
+                                item.kanjiChar,
+                                item.onyomi.join(', '), // Chuyển mảng thành chuỗi
+                                item.kunyomi.join(', '),
+                                item.meanings.join(', ')
+                            ]
+                        );
+                    }
+                }
+                console.log(`✅ Đã nạp xong Kanji ${lvl}`);
             }
         }
 
-        console.log('--- Data loading completed successfully! ---');
-        process.exit();
+        // --- 3. MIGRATION ALPHABET (KANA) ---
+        const alphabets = ['hiragana', 'katakana'];
+        for (const type of alphabets) {
+            const kanaPath = path.join(__dirname, `../../data/alphabet/${type}.json`);
+            if (fs.existsSync(kanaPath)) {
+                const data = JSON.parse(fs.readFileSync(kanaPath, 'utf8'));
+                const chunks = chunkArray(data, 20);
+
+                for (let i = 0; i < chunks.length; i++) {
+                    // Mặc định Alphabet thuộc N5
+                    const [res] = await connection.execute(
+                        "INSERT INTO `Lesson` (JLPT_Level, Title, Type) VALUES (?, ?, ?)",
+                        ['N5', `${type.charAt(0).toUpperCase() + type.slice(1)} - Bài ${i + 1}`, 'Kana']
+                    );
+                    const lessonId = res.insertId;
+
+                    for (const item of chunks[i]) {
+                        await connection.execute(
+                            "INSERT INTO `Kana` (LessonID, `Character`, Romaji) VALUES (?, ?, ?)",
+                            [lessonId, item.content, item.meaning]
+                        );
+                    }
+                }
+                console.log(`✅ Đã nạp xong Alphabet: ${type}`);
+            }
+        }
+
+        console.log("🎉 Hoàn thành nạp dữ liệu thành công!");
+
     } catch (error) {
-        console.error('Error loading data:', error);
-        process.exit(1);
+        console.error("❌ Lỗi trong quá trình migration:", error);
+    } finally {
+        await connection.end();
     }
 }
 
-async function processItems(items, levelId, catId, type) {
-    let currentUnitIdx = 1;
-    let countInUnit = 0;
-    let currentUnitId;
-
-    for (const item of items) {
-        // Create new Unit after every ITEMS_PER_UNIT words
-        if (countInUnit === 0) {
-            const unitName = `${type} Unit ${currentUnitIdx}`;
-            const [res] = await db.query('INSERT INTO unit (UnitName, LevelID) VALUES (?, ?)', [unitName, levelId]);
-            currentUnitId = res.insertId;
-            currentUnitIdx++;
-        }
-
-        let content, answer;
-        if (type === 'Kanji') {
-            content = item.kanjiChar;
-            answer = item.meanings.join(', ');
-        } else {
-            content = item.kanji || item.kana;
-            answer = item.waller_definition;
-        }
-
-        await db.query('INSERT INTO question (Content, CorrectAnswer, UnitID, CategoryID) VALUES (?, ?, ?, ?)', 
-            [content, answer, currentUnitId, catId]);
-        
-        countInUnit++;
-        if (countInUnit >= ITEMS_PER_UNIT) countInUnit = 0;
-    }
-}
-
-seed();
+migrateData();
