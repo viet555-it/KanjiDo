@@ -31,7 +31,7 @@ async function migrateData() {
     console.log("🚀 Bắt đầu quá trình Migration...");
 
     try {
-        // --- 1. MIGRATION VOCABULARY ---
+        // --- 1. MIGRATION VOCABULARY AND QUIZZES ---
         const levels = ['n5', 'n4', 'n3', 'n2', 'n1'];
         for (const lvl of levels) {
             const vocabPath = path.join(__dirname, `../../data/vocabulary/${lvl}.json`);
@@ -40,31 +40,53 @@ async function migrateData() {
                 const chunks = chunkArray(data, 20); // Chia 20 từ mỗi bài
 
                 for (let i = 0; i < chunks.length; i++) {
-                    // Tạo bài học mới cho mỗi nhóm 20 từ
-                    const [res] = await connection.execute(
-                        "INSERT INTO `Lesson` (JLPT_Level, Title, Type) VALUES (?, ?, ?)",
-                        [lvl.toUpperCase(), `Vocabulary ${lvl.toUpperCase()} - Lesson ${i + 1}`, 'Vocabulary']
-                    );
-                    const lessonId = res.insertId;
+                    const jlptCode = lvl.toUpperCase();
+                    
+                    // Assign difficulty based on ENUM requirements
+                    let difficulty = 'Normal';
+                    if (['N5', 'N4', 'N3'].includes(jlptCode)) {
+                        difficulty = 'Hard';
+                    } else if (['N2', 'N1'].includes(jlptCode)) {
+                        difficulty = 'Instant Death';
+                    }
 
-                    // Chèn 20 từ vào bảng Vocabulary
+                    // 1.1 Create Lesson
+                    const [resLesson] = await connection.execute(
+                        "INSERT INTO `Lesson` (JLPT_Level, Title, Type) VALUES (?, ?, ?)",
+                        [jlptCode, `Vocabulary ${jlptCode} - Lesson ${i + 1}`, 'Vocabulary']
+                    );
+                    const lessonId = resLesson.insertId;
+
+                    // 1.2 Create Quiz
+                    const [resQuiz] = await connection.execute(
+                        "INSERT INTO `Quiz` (QuizTitle, Difficulty) VALUES (?, ?)",
+                        [`Quiz Vocabulary ${jlptCode} - Lesson ${i + 1}`, difficulty]
+                    );
+                    const quizId = resQuiz.insertId;
+
                     for (const item of chunks[i]) {
-                        await connection.execute(
+                        const [resVocab] = await connection.execute(
                             "INSERT INTO `Vocabulary` (LessonID, Word, Furigana, Meaning) VALUES (?, ?, ?, ?)",
                             [
                                 lessonId,
-                                item.kanji || item.kana, // Ưu tiên Kanji, nếu không có dùng Kana
+                                item.kanji || item.kana,
                                 item.kana,
                                 item.waller_definition
                             ]
                         );
+                        const vocabId = resVocab.insertId;
+
+                        await connection.execute(
+                            "INSERT INTO `Quiz_Items` (QuizID, VocabID) VALUES (?, ?)",
+                            [quizId, vocabId]
+                        );
                     }
                 }
-                console.log(`✅ Đã nạp xong Vocabulary ${lvl}`);
+                console.log(`✅ Đã nạp xong Vocabulary & Quizzes ${lvl}`);
             }
         }
 
-        // --- 2. MIGRATION KANJI ---
+        // --- 2. MIGRATION KANJI AND QUIZZES ---
         for (const lvl of levels) {
             const kanjiPath = path.join(__dirname, `../../data/kanji/${lvl.toUpperCase()}.json`);
             if (fs.existsSync(kanjiPath)) {
@@ -72,30 +94,51 @@ async function migrateData() {
                 const chunks = chunkArray(data, 20);
 
                 for (let i = 0; i < chunks.length; i++) {
-                    const [res] = await connection.execute(
+                    const jlptCode = lvl.toUpperCase();
+                    
+                    let difficulty = 'Hard';
+                    if (['N2', 'N1'].includes(jlptCode)) {
+                        difficulty = 'Instant Death';
+                    }
+
+                    // 2.1 Create Lesson
+                    const [resLesson] = await connection.execute(
                         "INSERT INTO `Lesson` (JLPT_Level, Title, Type) VALUES (?, ?, ?)",
-                        [lvl.toUpperCase(), `Kanji ${lvl.toUpperCase()} - Lesson ${i + 1}`, 'Kanji']
+                        [jlptCode, `Kanji ${jlptCode} - Lesson ${i + 1}`, 'Kanji']
                     );
-                    const lessonId = res.insertId;
+                    const lessonId = resLesson.insertId;
+
+                    // 2.2 Create Quiz
+                    const [resQuiz] = await connection.execute(
+                        "INSERT INTO `Quiz` (QuizTitle, Difficulty) VALUES (?, ?)",
+                        [`Quiz Kanji ${jlptCode} - Lesson ${i + 1}`, difficulty]
+                    );
+                    const quizId = resQuiz.insertId;
 
                     for (const item of chunks[i]) {
-                        await connection.execute(
+                        const [resKanji] = await connection.execute(
                             "INSERT INTO `Kanji` (LessonID, `Character`, Onyomi, Kunyomi, Meaning) VALUES (?, ?, ?, ?, ?)",
                             [
                                 lessonId,
                                 item.kanjiChar,
-                                item.onyomi.join(', '), // Chuyển mảng thành chuỗi
+                                item.onyomi.join(', '),
                                 item.kunyomi.join(', '),
                                 item.meanings.join(', ')
                             ]
                         );
+                        const kanjiId = resKanji.insertId;
+
+                        await connection.execute(
+                            "INSERT INTO `Quiz_Items` (QuizID, KanjiID) VALUES (?, ?)",
+                            [quizId, kanjiId]
+                        );
                     }
                 }
-                console.log(`✅ Đã nạp xong Kanji ${lvl}`);
+                console.log(`✅ Đã nạp xong Kanji & Quizzes ${lvl}`);
             }
         }
 
-        // --- 3. MIGRATION ALPHABET (KANA) ---
+        // --- 3. MIGRATION ALPHABET (KANA) AND QUIZZES ---
         const alphabets = ['hiragana', 'katakana'];
         for (const type of alphabets) {
             const kanaPath = path.join(__dirname, `../../data/alphabet/${type}.json`);
@@ -104,25 +147,40 @@ async function migrateData() {
                 const chunks = chunkArray(data, 20);
 
                 for (let i = 0; i < chunks.length; i++) {
-                    // Mặc định Alphabet thuộc N5
-                    const [res] = await connection.execute(
+                    // Alphabets are set to 'Normal' difficulty
+                    const jlptCode = 'N5'; 
+                    // 3.1 Create Lesson
+                    const [resLesson] = await connection.execute(
                         "INSERT INTO `Lesson` (JLPT_Level, Title, Type) VALUES (?, ?, ?)",
-                        ['N5', `${type.charAt(0).toUpperCase() + type.slice(1)} - Bài ${i + 1}`, 'Kana']
+                        [jlptCode, `${type.charAt(0).toUpperCase() + type.slice(1)} - Bài ${i + 1}`, 'Kana']
                     );
-                    const lessonId = res.insertId;
+                    const lessonId = resLesson.insertId;
+
+                    // 3.2 Create Quiz
+                    const [resQuiz] = await connection.execute(
+                        "INSERT INTO `Quiz` (QuizTitle, Difficulty) VALUES (?, ?)",
+                        [`Quiz ${type.charAt(0).toUpperCase() + type.slice(1)} - Bài ${i + 1}`, 'Normal']
+                    );
+                    const quizId = resQuiz.insertId;
 
                     for (const item of chunks[i]) {
-                        await connection.execute(
+                        const [resKana] = await connection.execute(
                             "INSERT INTO `Kana` (LessonID, `Character`, Romaji) VALUES (?, ?, ?)",
                             [lessonId, item.content, item.meaning]
                         );
+                        const kanaId = resKana.insertId;
+
+                        await connection.execute(
+                            "INSERT INTO `Quiz_Items` (QuizID, KanaID) VALUES (?, ?)",
+                            [quizId, kanaId]
+                        );
                     }
                 }
-                console.log(`✅ Đã nạp xong Alphabet: ${type}`);
+                console.log(`✅ Đã nạp xong Alphabet & Quizzes: ${type}`);
             }
         }
 
-        console.log("🎉 Hoàn thành nạp dữ liệu thành công!");
+        console.log("🎉 Hoàn thành nạp dữ liệu (Lessons, Content, Quizzes) thành công!");
 
     } catch (error) {
         console.error("❌ Lỗi trong quá trình migration:", error);
