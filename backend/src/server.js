@@ -1,14 +1,22 @@
+import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import db from './config/db.js';
-
-// Load environment variables before importing app
+import routes from './routes/index.js';
+import { errorHandler } from './middlewares/errorHandler.js';
 dotenv.config();
 
-import app from './app.js';
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Main API Router
+app.use('/api', routes);
+
+// Global Error Handler Middleware (must be after routes)
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-
-// Start Server
 app.listen(PORT, () => {
-    console.log(`🚀 API Server running on port ${PORT}`);
+    console.log(`Server đang chạy tại port ${PORT}`);
 });

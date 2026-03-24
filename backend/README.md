@@ -1,82 +1,79 @@
-# Japanese Learning App - Backend 🌸
+# Japanese Learning App - Backend 🚀
 
-This is the backend API for an interactive, gamified Japanese Learning Web Platform. It serves vocabulary, kanji, and kana lessons (JLPT N5 to N1), powers custom quizzes, and tracks user study progress and achievements.
+This is the backend API for a highly interactive, dynamic Japanese learning platform built with Node.js, Express, and MySQL. It handles data access for vocabulary, kanji, and kana lessons; manages dynamic quiz sessions; and safely tracks user accounts, streaks, and progress achievements.
 
-## 🚀 Features
-* **Authentication**: JWT-based secure login, registration, and refresh-token sessions.
-* **Learning Content**: Serves structured data for Vocabulary, Kanji, and Kana by JLPT levels.
-* **Quiz Engine**: Admin tools to create quizzes, attach questions, and fetch randomized testing sessions.
-* **Gamification & Progress**: Tracks user quiz sessions, calculates average accuracy/time, handles streaks, and rewards users with unlockable Achievements.
+## 🗂️ Architecture & Folder Structure
 
-## 📂 Architecture & Scaling
-The backend was restructured for **maintainability and scalability**:
-* `src/server.js`: Purely handles the port listener and bootstrap operations.
-* `src/app.js`: Express application configuration, isolated for easy testing plugins and middlewares.
-* `src/routes/index.js`: A centralized router index. Allows for easy API versioning (e.g. `/api/v1`) in the future.
-* `src/middlewares/`: Global middlewares, such as a centralized `errorHandler.js` preventing unexpected server crashes, and `authMiddleware.js` for JWT security.
-* `src/controllers/`: Separated by domain logic (Auth, Progress, Content, Quiz, Sessions).
+To ensure the backend is **easy to maintain** and **highly scalable**, it is organized using standard Express best practices:
 
-## 🛠 Prerequisites
-* **Node.js**: v18+
-* **MySQL**: v8+ (with `japanese_learning_db` created)
+```
+backend/
+├── data/                  # Source JSON files used for initial database seeding
+├── src/
+│   ├── config/            # DB, environment, and 3rd party config settings
+│   │   └── db.js          # MySQL2 connection pool setup
+│   ├── controllers/       # Contains endpoints logic (Request/Response handling)
+│   ├── middlewares/       # Express middlewares 
+│   │   ├── authMiddleware.js # JWT verification
+│   │   └── errorHandler.js   # Global error handling and formatting
+│   ├── models/            # Separated Database models (For future scaling)
+│   ├── routes/            # Route definition files mapping URLs to controllers
+│   │   └── index.js       # The "Master Router" mapping all resources to /api
+│   ├── seeders/           # Migration scripts to build or reset local DB data
+│   │   └── seed.js        # Parses JSON files to seed MySQL databases
+│   ├── utils/             # Helper utilities and shared functions
+│   │   └── asyncHandler.js# Wrapper to gracefully pass async errors to 'next()'
+│   └── server.js          # Application entry point & core Express configuration
+├── .env                   # Environment variable configs (Port, JWT secrets)
+└── package.json
+```
 
-## 📦 Setup & Installation
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+## 🛠️ How it scales
 
-2. Configure environment variables. Create a `.env` file in the `backend/` root directory:
-   ```env
-   PORT=5000
-   DB_HOST=localhost
-   DB_USER=root
-   DB_PASSWORD=your_mysql_password
-   DB_NAME=japanese_learning_db
-   JWT_SECRET=your_super_secret_access_key
-   JWT_REFRESH_SECRET=your_super_secret_refresh_key
-   NODE_ENV=development
-   ```
+1. **Global Error Handling (`middlewares/errorHandler.js`)**
+   Instead of writing `res.status(500).json({ error })` inside `try...catch` blocks repeatedly across hundred of controllers, all errors are passed down to **one centralized location**. This ensures that error responses sent to the client are consistent everywhere in the application.
 
-3. Seed the database. This script wipes old data and cleanly structures your lessons, kanji, vocab, and quizzes.
-   ```bash
-   npm run seed
-   ```
+2. **Async Handler (`utils/asyncHandler.js`)**
+   Instead of wrapping every DB query inside `try { ... } catch(err) { next(err) }`, wrap the controller in `asyncHandler(async (req, res) => {...})`! This trims boilerplate and automatically redirects rejected promises to your `errorHandler`.
 
-4. Start the server (Development mode using nodemon):
-   ```bash
-   npm run dev
-   ```
+3. **Master Routing File (`routes/index.js`)**
+   Instead of dumping 30 separate `app.use()` calls inside `server.js`, `index.js` acts as a routing catalog. `server.js` remains clean and completely focused on server initialization, CORS setup, and basic middleware.
 
-## 🌐 Core API Endpoints
+4. **Dedicated Seeders (`seeders/seed.js`)**
+   Your database migration completely empties dependent tables via `SET FOREIGN_KEY_CHECKS = 0` and correctly re-seeds from raw `.json` files.
 
-### Authentication (`/api/auth`)
-* `POST /register`: Register a new user
-* `POST /login`: Get Access & Refresh JWT tokens
-* `POST /refresh`: Generate a new access token
-* `GET /profile`: Fetch auth user details & streaks
+## 🚀 Getting Started
 
-### Progress & Gameplay (`/api/sessions`, `/api/progress`)
-* `POST /api/sessions`: Initialize a new quiz session
-* `POST /api/sessions/statistics`: Save score & accuracy at the end of a quiz
-* `GET /api/progress/user/:id`: Retrieve historical metrics (Total Time, Average Accuracy)
-* `GET /api/progress/history/:id`: Get recent timeline of completed lessons
-* `GET /api/progress/achievements/user/:id`: See badges unlocked by a user
+### 1. Requirements
+*   Node.js v16+
+*   MySQL Server v8+
 
-### Quizzes (`/api/questions`)
-* `GET /api/questions`: List available testing quizzes
-* `GET /api/questions/:id`: Get actual questions attached to a quiz wrapper
-* `POST /api/questions`: (Admin) Generate a new quiz 
-* `POST /api/questions/:id/items`: (Admin) Attach Vocabulary/Kanji/Kana IDs to the quiz
+### 2. Environment Variables (`.env`)
+Create a `.env` file at the root of `backend/` and provide your configuration:
+```env
+PORT=5000
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=your_password
+DB_NAME=japanese_learning_db
 
-### Learning Library (`/api`)
-* `GET /api/lessons?level=N5`: Returns JLPT lessons
-* `GET /api/vocab?lessonId=1`: Fetch vocabulary for a specific lesson
-* `GET /api/kanji?lessonId=418`: Fetch kanji for a specific lesson
-* `GET /api/kana?lessonId=545`: Fetch katakana/hiragana
+JWT_SECRET=super_secret_access_key
+JWT_REFRESH_SECRET=super_secret_refresh_key
+```
 
-## 🤝 Contribution
-When adding new domains:
-1. Create your controller in `src/controllers/`.
-2. Map your routes in `src/routes/`.
-3. Register the new route file into the indexer at `src/routes/index.js`.
+### 3. Install & Seed
+```bash
+npm install
+npm run seed  # Caution: Drops internal DB quiz/learning data and rebuilds it.
+npm run dev   # Starts Nodemon watcher for live development
+```
+
+## 🌐 API Resources
+
+All Endpoints are configured under `/api/*`
+
+*   **Auth**: `/api/auth/register`, `/api/auth/login`, `/api/auth/profile`
+*   **Content**: `/api/lessons`, `/api/vocab`, `/api/kanji`, `/api/kana`
+*   **Quizzes**: `/api/questions`
+*   **Sessions**: `/api/sessions`
+*   **Progress/Analytics**: `/api/progress/history/:userId`, `/api/progress/achievements`
