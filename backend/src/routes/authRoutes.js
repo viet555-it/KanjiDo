@@ -5,7 +5,9 @@ import {
     refreshToken, 
     logout, 
     getProfile, 
-    updateProfile 
+    updateProfile,
+    googleLogin,
+    facebookLogin
 } from '../controllers/authController.js';
 import { authenticateToken } from '../middlewares/authMiddleware.js';
 
@@ -16,6 +18,8 @@ router.post('/register', register);
 router.post('/login', login);
 router.post('/refresh', refreshToken);
 router.post('/logout', logout);
+router.post('/google', googleLogin);
+router.post('/facebook', facebookLogin);
 
 // Protected routes (Require Access Token)
 router.get('/profile', authenticateToken, getProfile);

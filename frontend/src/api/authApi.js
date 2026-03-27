@@ -60,3 +60,23 @@ export const getUserProfile = async () => {
   const response = await axiosInstance.get('/auth/profile');
   return response.data;
 };
+
+/**
+ * POST /api/auth/google
+ * Body: { token } (Google ID Token)
+ */
+export const googleLoginApi = async (token) => {
+  const response = await axiosInstance.post('/auth/google', { token });
+  return response.data;
+};
+
+/**
+ * POST /api/auth/facebook
+ * Body: { accessToken, email, name }
+ */
+export const facebookLoginApi = async (accessToken, email, name) => {
+  const response = await axiosInstance.post('/auth/facebook', { 
+    accessToken, email, name 
+  });
+  return response.data;
+};

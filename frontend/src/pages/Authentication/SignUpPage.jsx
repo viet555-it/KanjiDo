@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Eye, EyeOff, ArrowLeft, Loader2, CheckCircle } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useGoogleLogin } from '@react-oauth/google';
+import ReactFacebookLogin from 'react-facebook-login/dist/facebook-login-render-props';
 import logo from '../../assets/images/logo.png';
 
 export default function SignUpPage() {
@@ -11,7 +13,38 @@ export default function SignUpPage() {
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
-  const { register } = useAuth();
+  const { register, loginWithGoogle, loginWithFacebook } = useAuth();
+
+  const handleGoogleLogin = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+      setIsLoading(true);
+      try {
+        await loginWithGoogle(tokenResponse.access_token);
+        navigate('/');
+      } catch (err) {
+        setError(err.response?.data?.message || 'Google signup failed.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    onError: () => setError('Google signup failed')
+  });
+
+  const responseFacebook = async (response) => {
+    if (response.accessToken) {
+      setIsLoading(true);
+      try {
+        await loginWithFacebook(response.accessToken, response.email, response.name);
+        navigate('/');
+      } catch (err) {
+        setError(err.response?.data?.message || 'Facebook signup failed.');
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      setError('Facebook signup failed');
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -176,12 +209,31 @@ export default function SignUpPage() {
 
           {/* Social Access */}
           <div className="grid grid-cols-2 gap-4 mt-8">
-             <button className="flex items-center justify-center gap-2 bg-[#1a1a1a] border border-white/5 py-4 rounded-2xl hover:bg-[#222] transition-all group">
+             <button 
+                onClick={() => handleGoogleLogin()}
+                disabled={isLoading}
+                type="button"
+                className="flex items-center justify-center gap-2 bg-[#1a1a1a] border border-white/5 py-4 rounded-2xl hover:bg-[#222] transition-all group disabled:opacity-50"
+             >
                 <span className="text-[12px] font-bold text-[#666] group-hover:text-white transition-colors tracking-widest uppercase">Google</span>
              </button>
-             <button className="flex items-center justify-center gap-2 bg-[#1a1a1a] border border-white/5 py-4 rounded-2xl hover:bg-[#222] transition-all group">
-                <span className="text-[12px] font-bold text-[#666] group-hover:text-white transition-colors tracking-widest uppercase">Facebook</span>
-             </button>
+             <ReactFacebookLogin
+                appId="958891499997923" // Dummy App ID
+                autoLoad={false}
+                scope="public_profile"
+                fields="name,picture"
+                callback={responseFacebook}
+                render={renderProps => (
+                  <button 
+                    onClick={renderProps.onClick}
+                    disabled={isLoading}
+                    type="button"
+                    className="flex items-center justify-center gap-2 bg-[#1a1a1a] border border-white/5 py-4 rounded-2xl hover:bg-[#222] transition-all group disabled:opacity-50"
+                  >
+                    <span className="text-[12px] font-bold text-[#666] group-hover:text-white transition-colors tracking-widest uppercase">Facebook</span>
+                  </button>
+                )}
+             />
           </div>
 
           {/* Redirect */}

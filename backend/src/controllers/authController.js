@@ -1,6 +1,10 @@
 import db from '../config/db.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
+import axios from 'axios';
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateAccessToken = (user) => {
     return jwt.sign(
@@ -176,5 +180,105 @@ export const updateProfile = async (req, res) => {
     } catch (error) {
         console.error("Update profile error:", error);
         res.status(500).json({ message: error.message });
+    }
+};
+
+export const googleLogin = async (req, res) => {
+    try {
+        const { token } = req.body;
+        if (!token) return res.status(400).json({ message: "Google token is required" });
+
+        // access_token from useGoogleLogin → call Google userinfo endpoint
+        const { data } = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        const email = data.email;
+        const name = data.name;
+
+        // check if user exists
+        let user;
+        const [users] = await db.query('SELECT * FROM user WHERE Email = ?', [email]);
+        
+        if (users.length === 0) {
+            // register new user with random password
+            const randomPassword = Math.random().toString(36).slice(-8);
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(randomPassword, salt);
+            
+            const [result] = await db.query(
+                'INSERT INTO user (Username, Email, PasswordHash) VALUES (?, ?, ?)',
+                [name, email, hashedPassword]
+            );
+            
+            const [newUsers] = await db.query('SELECT * FROM user WHERE UserID = ?', [result.insertId]);
+            user = newUsers[0];
+        } else {
+            user = users[0];
+        }
+
+        const accessToken = generateAccessToken(user);
+        const refreshToken = generateRefreshToken(user);
+
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 7);
+        await db.query(
+            'INSERT INTO refreshtokens (UserID, Token, ExpiryDate) VALUES (?, ?, ?)',
+            [user.UserID, refreshToken, expiryDate]
+        );
+
+        delete user.PasswordHash;
+        res.json({ message: "Google Login successful", user, accessToken, refreshToken });
+    } catch (error) {
+        console.error("Google login error:", error);
+        res.status(500).json({ message: "Google login verification failed" });
+    }
+};
+
+export const facebookLogin = async (req, res) => {
+    try {
+        const { accessToken, email, name } = req.body;
+        if (!accessToken) return res.status(400).json({ message: "Facebook access token is required" });
+
+        // verify with FB graph API
+        const { data } = await axios.get(`https://graph.facebook.com/me?fields=id,name,email&access_token=${accessToken}`);
+        
+        const userEmail = data.email || email || `${data.id}@facebook.com`;
+        const userName = data.name || name || 'Facebook User';
+
+        let user;
+        const [users] = await db.query('SELECT * FROM user WHERE Email = ?', [userEmail]);
+        
+        if (users.length === 0) {
+            // register
+            const randomPassword = Math.random().toString(36).slice(-8);
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(randomPassword, salt);
+            
+            const [result] = await db.query(
+                'INSERT INTO user (Username, Email, PasswordHash) VALUES (?, ?, ?)',
+                [userName, userEmail, hashedPassword]
+            );
+            
+            const [newUsers] = await db.query('SELECT * FROM user WHERE UserID = ?', [result.insertId]);
+            user = newUsers[0];
+        } else {
+            user = users[0];
+        }
+
+        const newAccessToken = generateAccessToken(user);
+        const refreshToken = generateRefreshToken(user);
+
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 7);
+        await db.query(
+            'INSERT INTO refreshtokens (UserID, Token, ExpiryDate) VALUES (?, ?, ?)',
+            [user.UserID, refreshToken, expiryDate]
+        );
+
+        delete user.PasswordHash;
+        res.json({ message: "Facebook Login successful", user, accessToken: newAccessToken, refreshToken });
+    } catch (error) {
+        console.error("Facebook login error:", error);
+        res.status(500).json({ message: "Facebook login verification failed" });
     }
 };
